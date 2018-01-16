@@ -23,21 +23,6 @@ staff and note are classes that are used mostly for draw methods but some other 
 tpTestCases are test functions for various assertion-testable things written (doesn't include graphic testing)
 
 
-Test Files Included:
-440HzSin
-A4
-G5
-C3
-A4#
-F5
-C5#
-D5#
-E5
-D5
-A-C-E
-Fur Elise
-
-
 CREDITS
 
 This project would not have been possible without the help of
