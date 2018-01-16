@@ -1,351 +1,251 @@
+# fourier transform file, where all sound analysis is done
+# gets passed in audio signal, manipulates to get notes for sheet music
+
+# contains wav_to_floats, which time samples audio, dft, which retrieves
+# frequency content, signalFrequencies, which gets frequencies of entire
+# signal, as well as many other signal filters that will map frequencies
+# to notes to write sheet music
+
 import wave
 import struct
 import sys
 import numpy as np
 import math
 import copy
+import statistics
 from note import *
-#import drawMusic
+
 
 #taken from course notes
-def almostEqual(x, y, epsilon = 10**-2):
+def almostEqual(x, y, epsilon = 10**-1):
     return abs(x-y) < epsilon
 
+
 def wav_to_floats(wave_file,dft): 
-    #from https://stackoverflow.com/questions/7769981/how-to-convert-wave-file-to-float-amplitude
+    #from https://stackoverflow.com/questions/7769981/
+    #how-to-convert-wave-file-to-float-amplitude
     #modified by Tara Stentz
     w = wave.open(wave_file)
+    #get data of audio file in time domain
     try:
         astr = w.readframes(w.getnframes())
-        print(type(astr))
-        print("len=",len(astr))
         # convert binary chunks to short 
-        #print(w.getnframes())
-        print("framesxchannels",w.getnframes()*w.getnchannels())
-        print(struct.calcsize("%ih" % (w.getnframes()*w.getnchannels())))
-        a = struct.unpack("%ih" % (w.getnframes()*w.getnchannels()), astr)
-    #a = [float(val) / pow(2, 15) for val in a]
-    ###PUT ABOVE LINE BACK
-    
+        a = struct.unpack("%ih" % (w.getnframes()*w.getnchannels()), astr)    
         return (a,w.getframerate(),w.getnchannels())
     except:
+        #if file corrupt, don't run code
         print("corrupt wav file :(")
         dft.corrupt=True
 
-# read the wav file specified as first command line arg
-#print(signal[0])
-
 
 def makeWindow(signal):
+    #get amplitudes of audio file in time domain from signal data
     window=[]
     for i in range(len(signal[0])):
         window.append(signal[0][i])
     return window
 
 
-
-
-
-#frequencies=DFT2(window)
-
 def downSample(signal,dft):
-    #account for sampling rates other than 44k
+    #downsize size of file to speed up program
     return signal[::dft.downSamp]
 
-#print("window=",window2)
 
-# print(len(window))
-
-
-def downSampCoef(dft):
+def downSampCoef(framerate):
+    #find highest possible increment to downsample with
     highFreq=830.609 # G5#, highest frequency detectable
     nyquist=highFreq*2
-    window=nyquist*3/2
+    window=nyquist+nyquist//2 #extra space beyond nyquist threshold
     coef=1
-    while coef*window<=dft.framerate:
+    while coef*window<=framerate:
         coef+=1
     return coef
 
 
-
 def dcOffset(signal):
+    #dc part of signal is average amplitude of whole signal
     sum=0
     for i in range(len(signal)):
         sum+=(signal[i])
     return sum/len(signal)
 
 def removeDCOffset(signal,dcOffset):
+    #remove dc part of signal, 0th frequency doesnt actually make noise
     for i in range(len(signal)):
         signal[i]-=dcOffset
     return signal
 
 
+#########################################################
+# The Fourier Transform Algorithm
+#########################################################
+
+# The Fourier Transform takes a signal in the time domain
+# and returns its components in the frequency domain
+
+# 1. Remove dc offset from signal so it doesn’t interfere
+# with frequency components
+# 2. Signal will have ands many frequency components as there
+# were time components, in this case heavily downsampled
+# 3. For each frequency component, loop through entire signal
+# 4. Use complex analysis with euler's equation to find
+# frequency content in each time sample
+# 5. After Fourier Transform, take largest frequency component
+# of signal (harmonics will be filtered later)
+# 6. Convert frequency component to Hz, mapping it from the
+# sampling index to the sampling rate
 
 
+#########################################################
 
 
-# print ("read "+str(len(signal))+" frames")
-# print  ("in the range "+str(min(signal[0]))+" to "+str(max(signal[0])))
+# makes extensive use of Signals and Systems by Alan Oppenheim
+# see credits for more details
 
+def DFT(window,dft):
 
-#window=signal[0][4000:5024]
-#print(window)
-
-import math
-def DFT(window): #window is a list of samples being transformed
-    samples=[]
-    magnitudes=[]
-    omega=dft.framerate/len(window) #signal[1]=framerate
-    max=(0,0)
-    sum=0
-    x=[]
-
-    for i in range(len(window)):
-        complexSample=window[i]*(math.e**(-j*omega*i))
-        sum+=complexSample
-        #samples.append(complexSample)
-        samples.append(sum)
-        #print(samples[0])
-        #print(complexSample,np.absolute(complexSample),np.real(complexSample),np.imag(complexSample))
-        real=np.real(complexSample)
-        imag=np.imag(complexSample)
-        magnitude=np.absolute(sum)
-        if magnitude>=max[0]:
-            max=(magnitude,window[i],i*omega)
-            #print("overwrite")
-        # if abs(magnitude)>0.1:
-        magnitudes.append(magnitude)
-        #agnitudes.append("potato")
-        #####GET MAGNITUDES OF SAMPLES
-    #print(samples)
-    return (magnitudes)
-
-#DC=[1 for i in range(500)]
-#print (DC)
-
-
-
-
-def DFT2(window,dft):
-
+    #remove dc content from signal
     dco=dcOffset(window)
     window=removeDCOffset(window,dco)
 
     omega=math.pi*2/len(window)
-    frequencies=[]
     freqMagnitudes=[]
     sum=0
 
     for k in range(len(window)):
-
         for n in range(len(window)):
             complexSample=window[n]*(math.e**(-dft.j*omega*n*k))
-            #complexSample=window[k]*(math.cos(omega*k*n)-j*math.sin(omega*k*n))
-            #print(complexSample)
+            #euler's equation adapted into signal processing
             sum+=complexSample
 
-        frequencies.append(sum)
         magnitude=np.absolute(sum)
         if not almostEqual(0,magnitude):
             freqMagnitudes.append((magnitude,k))
         else: 
-            freqMagnitudes.append((.01,k))
+            freqMagnitudes.append((0,k)) 
         sum=0
-    #print(freqMagnitudes)
 
     maxIndex=0
     maxAmplitude=0
-    fundamental=0
-    maxAmpIndex=0
 
-    # for i in range(len(freqMagnitudes)//4):
-    #     if almostEqual(freqMagnitudes[i][0],maxAmplitude):
-    #         pass
-    #     elif freqMagnitudes[i][0]>maxAmplitude:
-    #         maxIndex=i
-    #         maxAmplitude=freqMagnitudes[i][0]
+    #//2 for nyquist filtering, //2 again for low pass windowing
+    for i in range(len(freqMagnitudes)//4):
+        #find largest frequency component
+        if almostEqual(freqMagnitudes[i][0],maxAmplitude):
+            pass
+        elif freqMagnitudes[i][0]>maxAmplitude:
+            maxIndex=i
+            maxAmplitude=freqMagnitudes[i][0]
 
-
-
-
-    avg=0
-    for i in range(1,len(freqMagnitudes)//2):
-        avg+=freqMagnitudes[i][0]
-
-        avgSoFar=avg/i
-        #print("avg so far",avgSoFar,i,len(freqMagnitudes)//4)
-        weight=convertToHz(i,dft.framerate,len(window),dft)
-        print(5+(weight/90))
-        if freqMagnitudes[i][0]>(5+(weight/90))*avgSoFar:
-            maxIndex=i-1
-            fundamental=freqMagnitudes[i-1][0]
-            print("fundamental.....................................",fundamental)
-            break
-
-
-
-    #     if freqMagnitudes[i][0]>maxAmplitude:
-    #         maxAmpIndex=i
-    #         maxAmplitude=freqMagnitudes[i][0]
-    # if fundamental==0:
-    #     fundamental=maxAmplitude
-    #     maxIndex=maxAmpIndex
-    #     print("max......................",fundamental)
-
-
-
-
+    #convert index to Hz
     highFreq=convertToHz(maxIndex,dft.framerate,len(window),dft)
-    print("max freq in Hz is", highFreq)
 
     return highFreq
-    #return freqMagnitudes
-
-
-
-
-
-
-
-
-
-
 
 
 
 def convertToHz(maxFreqIndex,framerate,winlen,dft): 
-    #print(maxFreqIndex,dft.framerate,winlen)
-    return (dft.framerate*maxFreqIndex)/(winlen//dft.channels)/dft.downSamp#(maxFreqIndex)*framerate/winlen
-
-
-# frequencies=DFT2(window2[:512])
-# print(frequencies)
-
-
-
-
-
-
-def removeNoise(signal):
-    #get rid of dead space before signal
-    sampWindow=256
-    newSignal=signal
-    reverse=signal[::-1]
-    for i in range (len(signal)//sampWindow):
-        if almostEqual(DFT2(signal[sampWindow*i:sampWindow*(i+1)]),0):
-            print("zeroes in front")
-            newSignal=newSignal[sampWindow:]
-        else:
-            print("no more front zeroes")
-            break
-    # for i in range (len(signal)//sampWindow):
-    #     if almostEqual(DFT2(reverse[sampWindow*i:sampWindow*(i+1)]),0):
-    #         newSignal=newSignal[:sampWindow]
-    #         print("zeroes in back")
-    #     else:
-    #         print("no more back zeroes")
-    #         break
-    return newSignal
-
-
-# print(window)
-# window=removeNoise(window)
-# print(window)
-
-
-
-
-def beatDetection(frequencies,dft):
-    beatLength=[1 for i in range(len(frequencies))]
-    sampWindow=256
-    for i in range(len(frequencies)-1):
-        if almostEqual(frequencies[i],frequencies[i+1]):
-            if statistics.mean(dft.window[i*sampWindow:(i+1)*sampWindow])>=statistics.mean(dft.window[(i+1)*sampWindow:(i+2)*sampWindow]):
-                beatLength[i]+=1
-                #beatLength[i+1]+=1
-    return beatLength
-
-
-
-
-
-def noteLengths(beatLength,dft):
-    halfNote=2
-    wholeNote=3 #2^3=8
-    halfNotes=[]
-    wholeNotes=[]
-    for i in range(len(beatLength)):
-        if beatLength[i]==2 and beatLength[i-1]!=2:
-            halfNotes.append(i)
-        elif beatLength[i]==2 and beatLength[i-1]==2:
-            wholeNotes.append(i-1)
-            halfNotes.pop()
-    dft.halfNotes=halfNotes
-    dft.wholeNotes=wholeNotes
-    print(halfNotes)
-    print(wholeNotes)
-
-
-
-
-# window=[]
-# for i in range(len(signal[0])//100):
-#     window.append(signal[0][i])
-# print(window)
+    #map frequencies from index to Hz
+    df=(winlen//dft.channels)
+    return (dft.framerate*maxFreqIndex)/df/dft.downSamp
 
 
 def signalFrequencies(signal,dft):
-    #print("printing signal frequencies")
+    #break entire time signal into small chunks
+    #run fourier transform on all of them
     sampleFreqs=[]
     sampWindow=dft.sampleWindow
     for i in range(len(signal)//sampWindow):
         window=[]
-        #print("i=",i)
         for j in range(i*sampWindow,(i+1)*sampWindow):
-            #print("j=",j)
             if j<len(signal):
                 window.append(signal[j])
             else:
                 window.append(0)
-        #print(window)
-        sampleFreqs.append(DFT2(window,dft))
+        sampleFreqs.append(DFT(window,dft))
     return sampleFreqs
 
 
-####MAKE IT SO YOU SHIFT GENTLY NOT RECTANGULARLY
+def beatDetection(frequencies,dft):
+    #detect length of notes
+    beatLength=[1 for i in range(len(frequencies))]
+    sampWindow=dft.sampleWindow
+    for i in range(len(frequencies)-1):
+        if almostEqual(frequencies[i],frequencies[i+1]):
+            #if two frequencies are the same and amplitudes--, same note
+            if statistics.mean(dft.window[i*sampWindow:(i+1)*sampWindow])\
+            >=statistics.mean(dft.window[(i+1)*sampWindow:(i+2)*sampWindow]):
+                beatLength[i]+=1
+            #else same note played two different times
+    return beatLength
+
+
+def noteLengths(beatLength,dft):
+    #take output from beat length and find half and whole notes
+    halfNotes=[]
+    wholeNotes=[]
+    for i in range(len(beatLength)-1):
+        if beatLength[i]==2 and beatLength[i+1]!=2and beatLength[i-1]!=2:
+            halfNotes.append(i)
+        elif beatLength[i]==2 and beatLength[i+1]==2 and beatLength[i+2]==2:
+            wholeNotes.append(i)
+    dft.halfNotes=halfNotes
+    dft.wholeNotes=wholeNotes
 
 
 
-
-def removeDeadSpace(frequencies): #THE ONE THAT WORKS NEEDS TESTING THOUGH
-    newFrequencies=[]#copy.copy(frequencies)
+def removeDeadSpace(frequencies):
+    #gets rid of all frequencies<than min detectable frequency
+    newFrequencies=[]
     lowKey=110 #A3, lowest key in detectable range
-
-    # while newFrequencies[0]<lowKey:
-    #     newFrequencies=newFrequencies[1:]
 
     for frequency in frequencies:
         if frequency>=lowKey:
             newFrequencies.append(frequency)
 
+    return newFrequencies
+
+
+def filterHarmonics(frequencies,dft):
+    #remove extra harmonics from note that plays too long
+    sampWindow=dft.sampleWindow
+
+    for i in range(1,len(frequencies)):
+        if almostEqual(frequencies[i],frequencies[i-1]*2):
+            #if a frequency is 2x the one that came before it but
+            #new note wasnt played it jumped to harmonic
+            if statistics.mean(dft.window[(i-1)*sampWindow:(i)*sampWindow])\
+            >=statistics.mean(dft.window[(i-2)*sampWindow:(i-1)*sampWindow]):
+                frequencies[i]/=2
+
+    return frequencies
+
+
+
+def filterOutliers(frequencies):
+    #remove all frequencies higher than detecable range
+    newFrequencies=[]
+    highKey=831 #G5#, highest key in detectable range
+
+    for frequency in frequencies:
+        if frequency<=highKey:
+            newFrequencies.append(frequency)
 
     return newFrequencies
 
 
-
-
-
-
-
-
-def getTempo(frequencies):
-    # beatCopy=copy.copy(beatLength)
+def getTempo(frequencies,dft):
+    #use first note of song to set tempo
+    #all other notes defined relative to first(quarter)
     tempo=1
-    # while beatCopy[1]!=1:
-    #   pace+=1
-    #   beatCopy=beatCopy[1:]
 
-    notes=getNotes(frequencies)
+    notes=getNotes(frequencies,dft)
+
+    for i in range(1,len(notes)):
+        if notes[i].key[0]==notes[i-1].key[0] and \
+        notes[i].key != notes[i-1].key:
+            notes[i].key = notes[i-1].key
+            frequencies[i]/=2
 
     for i in range(len(notes)-1):
         if notes[i].key==notes[i+1].key:
@@ -356,104 +256,29 @@ def getTempo(frequencies):
     return tempo
 
 
-
-
-def getNotes(frequencies):
+def getNotes(frequencies,dft):
+    #map frequencies to notes
     notes=[]
     for frequency in frequencies:
         note=Note(frequency)
         notes.append(note)
-        note.findKey()
-        #print(note)
+        note.findKey(dft)
     return notes
 
 
-
-
-
-
 def setTempo(testFrequencies,tempo):
+    #increment list of all frequencies by changes
     return testFrequencies[::tempo]
 
 
 
+def filterLengths(frequencies):
+    if len(frequencies)<2:
+        frequencies=[frequencies[0]]
+    else: #extra harmonics from final notes
+        frequencies=frequencies[:-2]
+    return frequencies
 
 
 
 
-
-
-
-import statistics
-def lowPassFilter(signal):
-    newSignal=[]
-    while len(signal)>=2:
-        newSignal.append(statistics.mean(signal[0]+signal[1]))
-        signal=signal[2:]
-        print(mean(signal[0]+signal[1]))
-    return newSignal
-
-#signal=lowPassFilter(signal)  
-###FIX LOW PASS FILTER CODE
-
-#print(signal)  
-
-
-
-
-def raisedCosWindow():
-    window=[]
-    for i in range(256):
-        window.append(1-math.cos(i%(2*math.pi)))
-    return window
-
-#print(raisedCosWindow())
-
-def separate(signal):
-    evens=signal[::2]
-    odds=signal[1::2]
-    return (evens+odds)
-
-
-
-#print(DFT(window))
-#print(DFT(signal))
-
-#recursive fast implementation of dft
-def FFT(signal): #signal is power of 2
-   if len(signal)<2:
-   	   return (signal)
-   else:
-   	#don't actually add idk how to combine them though
-    signal=separate(signal)
-    evens=DFT2(signal[:len(signal)//2])
-    odds=DFT2(signal[len(signal)//2:])
-
-    newSignal=[0]*len(signal)
-
-    for i in range(len(signal)//2):
-        even=signal(i)
-        odd=signal(i+len(signal)//2)
-        omega=math.pi*2/len(signal)
-        w=(math.e**(-j*omega*k))
-
-        newSignal[i]=even+w*odd
-        newSignal[i+len(signal)//2]=even-w*odd
-
-
-    return FFT(newSignal)
-
-#print(FFT(window))
-
-
-#################################################
-# testAll and main
-#################################################
-
-def testAll():
-    # dear Tarana please remember to write test functions
-    pass
-
-
-
-print("fft over")
