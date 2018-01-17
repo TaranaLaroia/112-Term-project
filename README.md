@@ -20,8 +20,6 @@ drawMusic file draws sheet music
 
 staff and note are classes that are used mostly for draw methods but some other properties too
 
-tpTestCases are test functions for various assertion-testable things written (doesn't include graphic testing)
-
 
 CREDITS
 
